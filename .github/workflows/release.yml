@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: Release type
+        required: true
+        type: choice
+        options:
+          - Initial Release
+          - Redeploy
+          - Dry Run
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  setup:
+    name: Setup
+    runs-on: ubuntu-24.04
+    outputs:
+      branch: ${{ steps.set-branch.outputs.branch }}
+    steps:
+      - name: Set branch
+        id: set-branch
+        run: |
+          if [[ "${{ github.event.inputs.release_type }}" == "Dry Run" ]]; then
+            echo "branch=main" >> "$GITHUB_OUTPUT"
+          else
+            echo "branch=rc" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Branch guard
+        if: ${{ github.event.inputs.release_type != 'Dry Run' && github.ref_name != 'rc' && github.ref_name != 'hotfix-rc' }}
+        run: |
+          echo "::error::Releases must be triggered from the rc or hotfix-rc branch."
+          exit 1
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-24.04
+    needs: setup
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Download artifacts from latest build on ${{ needs.setup.outputs.branch }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          run_id=$(gh run list \
+            --workflow=build.yml \
+            --branch=${{ needs.setup.outputs.branch }} \
+            --status=success \
+            --limit=1 \
+            --json databaseId \
+            --jq '.[0].databaseId')
+
+          if [[ -z "$run_id" ]]; then
+            echo "::error::No successful build found on branch ${{ needs.setup.outputs.branch }}"
+            exit 1
+          fi
+
+          echo "Downloading artifacts from run $run_id"
+          gh run download "$run_id" --name image --dir ./artifacts
+
+      - name: Display artifact
+        run: cat ./artifacts/image.txt
+
+      - name: Create draft release
+        if: ${{ github.event.inputs.release_type != 'Dry Run' }}
+        uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1.21.0
+        with:
+          artifacts: "./artifacts/*"
+          draft: true
+          tag: v${{ github.run_number }}
+          name: Release v${{ github.run_number }}
+          body: |
+            ## Release v${{ github.run_number }}
+
+            Artifacts from build on `${{ needs.setup.outputs.branch }}`.
+          token: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,43 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+      - rc
+      - hotfix-rc
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run lint
+        run: echo "Linting..."
+
+  build:
+    name: Build
+    runs-on: ubuntu-24.04
+    needs: lint
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Build image
+        run: |
+          echo "Building image..."
+          echo "image=${{ github.repository }}:${{ github.ref_name }}" > image.txt
+          echo "sha=${{ github.sha }}" >> image.txt
+          echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> image.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: image
+          path: image.txt

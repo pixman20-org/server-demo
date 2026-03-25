@@ -1,0 +1,99 @@
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to publish (or "latest")
+        required: true
+        default: latest
+        type: string
+      branch:
+        description: Branch to publish from
+        required: true
+        default: rc
+        type: choice
+        options:
+          - rc
+          - hotfix-rc
+      dry_run:
+        description: Dry run (skip actual publish)
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  deployments: write
+
+jobs:
+  setup:
+    name: Setup
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.resolve-version.outputs.version }}
+      deployment-id: ${{ steps.deployment.outputs.deployment_id }}
+    steps:
+      - name: Resolve version
+        id: resolve-version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "${{ github.event.inputs.version }}" == "latest" ]]; then
+            version=$(gh api repos/${{ github.repository }}/releases/latest --jq '.tag_name' | sed 's/^v//')
+          else
+            version="${{ github.event.inputs.version }}"
+          fi
+          echo "Resolved version: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub deployment
+        if: ${{ !inputs.dry_run }}
+        id: deployment
+        uses: chrnorm/deployment-action@55729fcebec3d284f60f5bcabbd8376437d696b1 # v2.0.7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          initial-status: in_progress
+          environment: production
+          description: Deployment ${{ steps.resolve-version.outputs.version }} from branch ${{ inputs.branch }}
+          task: release
+
+  publish:
+    name: Publish Image
+    runs-on: ubuntu-24.04
+    needs: setup
+    steps:
+      - name: Publish image
+        run: |
+          if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+            echo "[DRY RUN] Would publish image from branch ${{ inputs.branch }} as version ${{ needs.setup.outputs.version }}"
+          else
+            echo "Publishing image from branch ${{ inputs.branch }} as version ${{ needs.setup.outputs.version }}"
+            echo "  source tag : ${{ inputs.branch }}"
+            echo "  dest tags  : ${{ needs.setup.outputs.version }}, latest"
+          fi
+
+  update-deployment:
+    name: Update Deployment Status
+    runs-on: ubuntu-24.04
+    needs: [setup, publish]
+    if: ${{ always() && !inputs.dry_run }}
+    steps:
+      - name: Check for failures
+        if: ${{ contains(needs.*.result, 'failure') }}
+        run: exit 1
+
+      - name: Update deployment status to Success
+        if: success()
+        uses: chrnorm/deployment-status@9a72af4586197112e0491ea843682b5dc280d806 # v2.0.3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          state: success
+          deployment-id: ${{ needs.setup.outputs.deployment-id }}
+
+      - name: Update deployment status to Failure
+        if: failure()
+        uses: chrnorm/deployment-status@9a72af4586197112e0491ea843682b5dc280d806 # v2.0.3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          state: failure
+          deployment-id: ${{ needs.setup.outputs.deployment-id }}
