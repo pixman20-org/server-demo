@@ -84,7 +84,7 @@ jobs:
     name: Main Channel
     needs: build
     if: github.event_name == 'push' && github.ref_name == 'main'
-    uses: devops-demo/.github/workflows/server-main-channel.yml@main
+    uses: pixman20-org/devops-demo/.github/workflows/server-main-channel.yml@main
     with:
       run_id: ${{ github.run_id }}
       repo: ${{ github.repository }}
@@ -93,7 +93,7 @@ jobs:
     name: RC Channel
     needs: build
     if: github.event_name == 'push' && github.ref_name == 'rc'
-    uses: devops-demo/.github/workflows/server-rc-channel.yml@main
+    uses: pixman20-org/devops-demo/.github/workflows/server-rc-channel.yml@main
     with:
       run_id: ${{ github.run_id }}
       repo: ${{ github.repository }}
@@ -102,7 +102,7 @@ jobs:
     name: Hotfix-RC Channel
     needs: build
     if: github.event_name == 'push' && github.ref_name == 'hotfix-rc'
-    uses: devops-demo/.github/workflows/server-hotfix-rc-channel.yml@main
+    uses: pixman20-org/devops-demo/.github/workflows/server-hotfix-rc-channel.yml@main
     with:
       run_id: ${{ github.run_id }}
       repo: ${{ github.repository }}
