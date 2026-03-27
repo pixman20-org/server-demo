@@ -22,7 +22,14 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       branch: ${{ steps.set-branch.outputs.branch }}
+      release_version: ${{ steps.version.outputs.version }}
     steps:
+      - name: Branch guard
+        if: ${{ github.event.inputs.release_type != 'Dry Run' && github.ref_name != 'rc' && github.ref_name != 'hotfix-rc' }}
+        run: |
+          echo "::error::Releases must be triggered from the rc or hotfix-rc branch."
+          exit 1
+
       - name: Set branch
         id: set-branch
         run: |
@@ -32,11 +39,15 @@ jobs:
             echo "branch=rc" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Branch guard
-        if: ${{ github.event.inputs.release_type != 'Dry Run' && github.ref_name != 'rc' && github.ref_name != 'hotfix-rc' }}
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Get release version
+        id: version
         run: |
-          echo "::error::Releases must be triggered from the rc or hotfix-rc branch."
-          exit 1
+          VERSION=$(grep -oP '(?<=<Version>)[^<]+' Directory.Build.props)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Release version: $VERSION"
 
   release:
     name: Create Release
@@ -75,10 +86,10 @@ jobs:
         with:
           artifacts: "./artifacts/*"
           draft: true
-          tag: v${{ github.run_number }}
-          name: Release v${{ github.run_number }}
+          tag: ${{ needs.setup.outputs.release_version }}
+          name: Version ${{ needs.setup.outputs.release_version }}
           body: |
-            ## Release v${{ github.run_number }}
+            ## Version ${{ needs.setup.outputs.release_version }}
 
             Artifacts from build on `${{ needs.setup.outputs.branch }}`.
           token: ${{ secrets.GITHUB_TOKEN }}
