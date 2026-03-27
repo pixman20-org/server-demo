@@ -1,0 +1,108 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+      - rc
+      - hotfix-rc
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run lint
+        run: echo "Linting..."
+
+  build:
+    name: Build
+    runs-on: ubuntu-24.04
+    needs: lint
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Build image
+        run: |
+          echo "Building image..."
+          echo "image=${{ github.repository }}:${{ github.ref_name }}" > image.txt
+          echo "sha=${{ github.sha }}" >> image.txt
+          echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> image.txt
+
+      - name: Generate digest manifest
+        run: |
+          echo "Generating digest manifest..."
+          echo "{" > digests.json
+          echo "  \"api\": \"sha256:abc123def456\"," >> digests.json
+          echo "  \"identity\": \"sha256:def789ghi012\"," >> digests.json
+          echo "  \"web\": \"sha256:ghi345jkl678\"" >> digests.json
+          echo "}" >> digests.json
+
+      - name: Generate stubs
+        run: |
+          echo "Generating API stubs..." > stubs.txt
+          echo "Stub version: 1.0.0" >> stubs.txt
+          echo "Generated at: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> stubs.txt
+
+      - name: Generate swagger
+        run: |
+          echo "Generating OpenAPI spec..." > swagger.json
+          echo "{\"openapi\": \"3.0.0\", \"info\": {\"version\": \"1.0.0\"}}" >> swagger.json
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: image
+          path: image.txt
+
+      - name: Upload digest manifest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: digests
+          path: digests.json
+
+      - name: Upload stubs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: stubs
+          path: stubs.txt
+
+      - name: Upload swagger
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: swagger
+          path: swagger.json
+
+  trigger-main-channel:
+    name: Main Channel
+    needs: build
+    if: github.event_name == 'push' && github.ref_name == 'main'
+    uses: bitwarden/devops-demo/.github/workflows/server-main-channel.yml@main
+    with:
+      run_id: ${{ github.run_id }}
+      repo: ${{ github.repository }}
+
+  trigger-rc-channel:
+    name: RC Channel
+    needs: build
+    if: github.event_name == 'push' && github.ref_name == 'rc'
+    uses: bitwarden/devops-demo/.github/workflows/server-rc-channel.yml@main
+    with:
+      run_id: ${{ github.run_id }}
+      repo: ${{ github.repository }}
+
+  trigger-hotfix-rc-channel:
+    name: Hotfix-RC Channel
+    needs: build
+    if: github.event_name == 'push' && github.ref_name == 'hotfix-rc'
+    uses: bitwarden/devops-demo/.github/workflows/server-hotfix-rc-channel.yml@main
+    with:
+      run_id: ${{ github.run_id }}
+      repo: ${{ github.repository }}
