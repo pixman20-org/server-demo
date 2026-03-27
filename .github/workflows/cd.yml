@@ -4,14 +4,21 @@ on:
   workflow_call:
   workflow_dispatch:
 
+# Routes server builds to the release train orchestrator in devops-demo.
+#
+# Three tracks:
+#   main      → orchestrator with branch=main (deploy to US-DEV only, no gates)
+#   rc        → orchestrator with branch=rc (full release pipeline with approval gates)
+#   hotfix-rc → orchestrator with branch=hotfix-rc (release pipeline, QA deploy skipped)
+
 jobs:
   determine-target:
     name: Determine deployment target
     runs-on: ubuntu-24.04
     outputs:
       branch_name: ${{ steps.branch.outputs.branch_name }}
-      is_main: ${{ steps.branch.outputs.is_main }}
-      is_rc: ${{ steps.branch.outputs.is_rc }}
+      should_orchestrate: ${{ steps.branch.outputs.should_orchestrate }}
+      skip_qa_deploy: ${{ steps.branch.outputs.skip_qa_deploy }}
     steps:
       - name: Determine branch
         id: branch
@@ -19,47 +26,28 @@ jobs:
           BRANCH_NAME="${GITHUB_REF#refs/heads/}"
           echo "branch_name=$BRANCH_NAME" >> "$GITHUB_OUTPUT"
 
-          if [[ "$BRANCH_NAME" == "main" ]]; then
-            echo "is_main=true" >> "$GITHUB_OUTPUT"
-            echo "is_rc=false" >> "$GITHUB_OUTPUT"
-          elif [[ "$BRANCH_NAME" == "rc" || "$BRANCH_NAME" == "hotfix-rc" ]]; then
-            echo "is_main=false" >> "$GITHUB_OUTPUT"
-            echo "is_rc=true" >> "$GITHUB_OUTPUT"
+          case "$BRANCH_NAME" in
+            main|rc|hotfix-rc)
+              echo "should_orchestrate=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "should_orchestrate=false" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+          # Hotfix-rc skips QA deploys — hotfixes go straight to sign-off
+          if [[ "$BRANCH_NAME" == "hotfix-rc" ]]; then
+            echo "skip_qa_deploy=true" >> "$GITHUB_OUTPUT"
           else
-            echo "is_main=false" >> "$GITHUB_OUTPUT"
-            echo "is_rc=false" >> "$GITHUB_OUTPUT"
+            echo "skip_qa_deploy=false" >> "$GITHUB_OUTPUT"
           fi
 
           echo "Branch: $BRANCH_NAME"
 
-  deploy-usdev:
-    name: Deploy to US-DEV
-    needs: determine-target
-    if: needs.determine-target.outputs.is_main == 'true'
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Trigger deploy-k8s to US-DEV
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
-        with:
-          github-token: ${{ secrets.TRIGGER_CD_PAT }}
-          script: |
-            await github.rest.actions.createWorkflowDispatch({
-              owner: 'pixman20-org',
-              repo: 'devops-demo',
-              workflow_id: 'deploy-k8s.yml',
-              ref: 'main',
-              inputs: {
-                environment: 'US-DEV Cloud',
-                tag: 'main',
-                'force-deploy': 'false'
-              }
-            });
-            console.log('Dispatched deploy-k8s.yml to US-DEV Cloud with tag: main');
-
   trigger-orchestrator:
     name: Trigger Release Train
     needs: determine-target
-    if: needs.determine-target.outputs.is_rc == 'true'
+    if: needs.determine-target.outputs.should_orchestrate == 'true'
     runs-on: ubuntu-24.04
     steps:
       - name: Trigger release-train-server orchestrator
@@ -67,13 +55,17 @@ jobs:
         with:
           github-token: ${{ secrets.TRIGGER_CD_PAT }}
           script: |
+            const branch = '${{ needs.determine-target.outputs.branch_name }}';
+            const skipQaDeploy = '${{ needs.determine-target.outputs.skip_qa_deploy }}';
             await github.rest.actions.createWorkflowDispatch({
               owner: 'pixman20-org',
               repo: 'devops-demo',
               workflow_id: 'release-train-server.yml',
               ref: 'main',
               inputs: {
-                trigger_source: 'server-build'
+                trigger_source: 'server-build',
+                branch: branch,
+                skip_qa_deploy: skipQaDeploy
               }
             });
-            console.log('Dispatched release-train-server.yml orchestrator');
+            console.log(`Dispatched release-train-server.yml for branch=${branch}, skip_qa_deploy=${skipQaDeploy}`);
