@@ -84,28 +84,49 @@ jobs:
           path: swagger.json
 
   trigger-main-channel:
-    name: Main Channel
+    name: Trigger Main Channel
+    runs-on: ubuntu-24.04
     needs: build
     if: github.event_name == 'push' && github.ref_name == 'main'
-    uses: pixman20-org/devops-demo/.github/workflows/server-main-channel.yml@main
-    with:
-      run_id: ${{ github.run_id }}
-      repo: ${{ github.repository }}
+    steps:
+      - name: Trigger main channel orchestrator
+        run: |
+          gh workflow run server-main-channel.yml \
+            --repo pixman20-org/devops-demo \
+            --ref main \
+            --field run_id=${{ github.run_id }} \
+            --field repo=${{ github.repository }}
+        env:
+          GH_TOKEN: ${{ secrets.TRIGGER_CD_PAT }}
 
   trigger-rc-channel:
-    name: RC Channel
+    name: Trigger RC Channel
+    runs-on: ubuntu-24.04
     needs: build
     if: github.event_name == 'push' && github.ref_name == 'rc'
-    uses: pixman20-org/devops-demo/.github/workflows/server-rc-channel.yml@main
-    with:
-      run_id: ${{ github.run_id }}
-      repo: ${{ github.repository }}
+    steps:
+      - name: Trigger RC channel orchestrator
+        run: |
+          gh workflow run server-rc-channel.yml \
+            --repo pixman20-org/devops-demo \
+            --ref main \
+            --field run_id=${{ github.run_id }} \
+            --field repo=${{ github.repository }}
+        env:
+          GH_TOKEN: ${{ secrets.TRIGGER_CD_PAT }}
 
   trigger-hotfix-rc-channel:
-    name: Hotfix-RC Channel
+    name: Trigger Hotfix-RC Channel
+    runs-on: ubuntu-24.04
     needs: build
     if: github.event_name == 'push' && github.ref_name == 'hotfix-rc'
-    uses: pixman20-org/devops-demo/.github/workflows/server-hotfix-rc-channel.yml@main
-    with:
-      run_id: ${{ github.run_id }}
-      repo: ${{ github.repository }}
+    steps:
+      - name: Trigger hotfix-RC channel orchestrator
+        run: |
+          gh workflow run server-hotfix-rc-channel.yml \
+            --repo pixman20-org/devops-demo \
+            --ref main \
+            --field run_id=${{ github.run_id }} \
+            --field repo=${{ github.repository }}
+        env:
+          GH_TOKEN: ${{ secrets.TRIGGER_CD_PAT }}
