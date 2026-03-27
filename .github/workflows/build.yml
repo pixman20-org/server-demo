@@ -41,3 +41,12 @@ jobs:
         with:
           name: image
           path: image.txt
+
+  cd:
+    name: CD
+    needs: build
+    if: |
+      github.event_name != 'pull_request'
+      && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/rc' || github.ref == 'refs/heads/hotfix-rc')
+    uses: ./.github/workflows/cd.yml
+    secrets: inherit

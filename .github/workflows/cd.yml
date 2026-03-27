@@ -1,0 +1,79 @@
+name: CD
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  determine-target:
+    name: Determine deployment target
+    runs-on: ubuntu-24.04
+    outputs:
+      branch_name: ${{ steps.branch.outputs.branch_name }}
+      is_main: ${{ steps.branch.outputs.is_main }}
+      is_rc: ${{ steps.branch.outputs.is_rc }}
+    steps:
+      - name: Determine branch
+        id: branch
+        run: |
+          BRANCH_NAME="${GITHUB_REF#refs/heads/}"
+          echo "branch_name=$BRANCH_NAME" >> "$GITHUB_OUTPUT"
+
+          if [[ "$BRANCH_NAME" == "main" ]]; then
+            echo "is_main=true" >> "$GITHUB_OUTPUT"
+            echo "is_rc=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$BRANCH_NAME" == "rc" || "$BRANCH_NAME" == "hotfix-rc" ]]; then
+            echo "is_main=false" >> "$GITHUB_OUTPUT"
+            echo "is_rc=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_main=false" >> "$GITHUB_OUTPUT"
+            echo "is_rc=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "Branch: $BRANCH_NAME"
+
+  deploy-usdev:
+    name: Deploy to US-DEV
+    needs: determine-target
+    if: needs.determine-target.outputs.is_main == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Trigger deploy-k8s to US-DEV
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          github-token: ${{ secrets.TRIGGER_CD_PAT }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: 'pixman20-org',
+              repo: 'devops-demo',
+              workflow_id: 'deploy-k8s.yml',
+              ref: 'main',
+              inputs: {
+                environment: 'US-DEV Cloud',
+                tag: 'main',
+                'force-deploy': 'false'
+              }
+            });
+            console.log('Dispatched deploy-k8s.yml to US-DEV Cloud with tag: main');
+
+  trigger-orchestrator:
+    name: Trigger Release Train
+    needs: determine-target
+    if: needs.determine-target.outputs.is_rc == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Trigger release-train-server orchestrator
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          github-token: ${{ secrets.TRIGGER_CD_PAT }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: 'pixman20-org',
+              repo: 'devops-demo',
+              workflow_id: 'release-train-server.yml',
+              ref: 'main',
+              inputs: {
+                trigger_source: 'server-build'
+              }
+            });
+            console.log('Dispatched release-train-server.yml orchestrator');
