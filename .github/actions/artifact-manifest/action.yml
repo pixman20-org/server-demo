@@ -51,7 +51,7 @@ runs:
       if: inputs.artifact_lists == ''
       shell: bash
       run: |
-        ENTRY=$(jq -n \
+        ENTRY=$(jq -cn \
           --arg type "${{ inputs.type }}" \
           --arg name "${{ inputs.name }}" \
           --arg registry "${{ inputs.registry }}" \
