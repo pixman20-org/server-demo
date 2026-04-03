@@ -1,0 +1,170 @@
+name: Build-Brian
+
+on:
+  push:
+    branches:
+      - main
+      - rc
+      - hotfix-rc
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+env:
+  artifact_manifest_list: ''
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run lint
+        run: echo "Linting..."
+
+  build:
+    name: Build
+    runs-on: ubuntu-24.04
+    needs: lint
+    outputs:
+      manifest_artifacts: ${{ steps.collect-artifacts.outputs.manifest_artifacts }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Build image
+        run: |
+          REGISTRY="mock-registry.azurecr.io"
+          IMAGE="server"
+          TAG="${{ github.ref_name }}"
+          DIGEST="sha256:mock$(echo "${IMAGE}-${TAG}" | md5sum | head -c 32)0000000000000000"
+          echo "[MOCK] Building ${IMAGE}..."
+          echo "[MOCK] Pushed ${REGISTRY}/${IMAGE}:${TAG}@${DIGEST}"
+          echo "IMAGE_REGISTRY=${REGISTRY}" >> $GITHUB_ENV
+          echo "IMAGE_NAME=${IMAGE}" >> $GITHUB_ENV
+          echo "IMAGE_TAG=${TAG}" >> $GITHUB_ENV
+          echo "IMAGE_DIGEST=${DIGEST}" >> $GITHUB_ENV
+
+      - uses: ./.github/actions/artifact-manifest
+        with:
+          type: container image
+          name: server
+          registry: ${{ env.IMAGE_REGISTRY }}
+          image: ${{ env.IMAGE_NAME }}
+          tag: ${{ env.IMAGE_TAG }}
+          digest: ${{ env.IMAGE_DIGEST }}
+
+      - name: Generate stubs
+        run: |
+          VERSION="1.0.0"
+          echo "Generating API stubs..." > stubs.txt
+          echo "Stub version: ${VERSION}" >> stubs.txt
+          echo "Generated at: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> stubs.txt
+          echo "STUBS_VERSION=${VERSION}" >> $GITHUB_ENV
+          echo "STUBS_CHECKSUM=sha256:$(sha256sum stubs.txt | cut -d' ' -f1)" >> $GITHUB_ENV
+
+      - uses: ./.github/actions/artifact-manifest
+        with:
+          type: gha artifact
+          name: stubs
+          version: ${{ env.STUBS_VERSION }}
+          checksum: ${{ env.STUBS_CHECKSUM }}
+
+      - name: Generate swagger
+        run: |
+          VERSION="1.0.0"
+          echo "Generating OpenAPI spec..." > swagger.json
+          echo "{\"openapi\":\"3.0.0\",\"info\":{\"version\":\"${VERSION}\"}}" >> swagger.json
+          echo "SWAGGER_VERSION=${VERSION}" >> $GITHUB_ENV
+          echo "SWAGGER_CHECKSUM=sha256:$(sha256sum swagger.json | cut -d' ' -f1)" >> $GITHUB_ENV
+
+      - uses: ./.github/actions/artifact-manifest
+        with:
+          type: gha artifact
+          name: swagger
+          version: ${{ env.SWAGGER_VERSION }}
+          checksum: ${{ env.SWAGGER_CHECKSUM }}
+
+      - name: Collect artifact metadata
+        id: collect-artifacts
+        run: |
+          echo "manifest_artifacts=[${artifact_manifest_list}]" >> $GITHUB_OUTPUT
+
+      - name: Upload stubs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: stubs
+          path: stubs.txt
+
+      - name: Upload swagger
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: swagger
+          path: swagger.json
+
+  build-manifest:
+    name: Build Manifest
+    runs-on: ubuntu-24.04
+    needs: build
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./.github/actions/artifact-manifest
+        with:
+          artifact_lists: >-
+            [${{ needs.build.outputs.manifest_artifacts }}]
+
+  trigger-main-channel:
+    name: Trigger Main Channel
+    runs-on: ubuntu-24.04
+    needs: build-manifest
+    if: github.event_name == 'push' && github.ref_name == 'main'
+    steps:
+      - name: Trigger main channel orchestrator
+        run: |
+          gh workflow run server-main-channel.yml \
+            --repo pixman20-org/devops-demo \
+            --ref main \
+            --field run_id=${{ github.run_id }} \
+            --field repo=${{ github.repository }} \
+            --field artifact_manifest=artifact_manifest
+        env:
+          GH_TOKEN: ${{ secrets.TRIGGER_CD_PAT }}
+
+  trigger-rc-channel:
+    name: Trigger RC Channel
+    runs-on: ubuntu-24.04
+    needs: build-manifest
+    if: github.event_name == 'push' && github.ref_name == 'rc'
+    steps:
+      - name: Trigger RC channel orchestrator
+        run: |
+          gh workflow run server-rc-channel.yml \
+            --repo pixman20-org/devops-demo \
+            --ref main \
+            --field run_id=${{ github.run_id }} \
+            --field repo=${{ github.repository }} \
+            --field artifact_manifest=artifact_manifest
+        env:
+          GH_TOKEN: ${{ secrets.TRIGGER_CD_PAT }}
+
+  trigger-hotfix-rc-channel:
+    name: Trigger Hotfix-RC Channel
+    runs-on: ubuntu-24.04
+    needs: build-manifest
+    if: github.event_name == 'push' && github.ref_name == 'hotfix-rc'
+    steps:
+      - name: Trigger hotfix-RC channel orchestrator
+        run: |
+          gh workflow run server-hotfix-rc-channel.yml \
+            --repo pixman20-org/devops-demo \
+            --ref main \
+            --field run_id=${{ github.run_id }} \
+            --field repo=${{ github.repository }} \
+            --field artifact_manifest=artifact_manifest
+        env:
+          GH_TOKEN: ${{ secrets.TRIGGER_CD_PAT }}

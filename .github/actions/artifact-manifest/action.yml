@@ -1,0 +1,93 @@
+name: Artifact Manifest
+description: >
+  Append mode: adds an artifact entry to artifact_manifest_list in the job environment.
+  Build mode: triggered when artifact_lists is provided — flattens all job lists, builds
+  manifest.json, and uploads it as a GHA artifact.
+
+inputs:
+  artifact_lists:
+    description: >
+      JSON array of artifact arrays, one per producing job. When provided, switches to
+      build mode. Caller wraps each job's manifest_artifacts output in an outer array.
+    required: false
+    default: ''
+  type:
+    description: 'Artifact type (e.g. "container image", "gha artifact"). Append mode only.'
+    required: false
+    default: ''
+  name:
+    description: 'Artifact name. Used as the key in the manifest. Append mode only.'
+    required: false
+    default: ''
+  registry:
+    description: 'Container registry URL. Container image only.'
+    required: false
+    default: ''
+  image:
+    description: 'Image name. Container image only.'
+    required: false
+    default: ''
+  tag:
+    description: 'Image tag. Container image only.'
+    required: false
+    default: ''
+  digest:
+    description: 'Image digest. Container image only.'
+    required: false
+    default: ''
+  version:
+    description: 'Artifact version. GHA artifact only.'
+    required: false
+    default: ''
+  checksum:
+    description: 'Artifact checksum. GHA artifact only.'
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Append artifact entry
+      if: inputs.artifact_lists == ''
+      shell: bash
+      run: |
+        ENTRY=$(jq -cn \
+          --arg type "${{ inputs.type }}" \
+          --arg name "${{ inputs.name }}" \
+          --arg registry "${{ inputs.registry }}" \
+          --arg image "${{ inputs.image }}" \
+          --arg tag "${{ inputs.tag }}" \
+          --arg digest "${{ inputs.digest }}" \
+          --arg version "${{ inputs.version }}" \
+          --arg checksum "${{ inputs.checksum }}" \
+          '{type: $type, name: $name, registry: $registry, image: $image, tag: $tag,
+            digest: $digest, version: $version, checksum: $checksum}
+           | with_entries(select(.value != ""))')
+        echo "artifact_manifest_list=${artifact_manifest_list}${artifact_manifest_list:+,}${ENTRY}" >> $GITHUB_ENV
+
+    - name: Build manifest
+      if: inputs.artifact_lists != ''
+      shell: bash
+      run: |
+        jq -n \
+          --arg run_id "${{ github.run_id }}" \
+          --arg repository "${{ github.repository }}" \
+          --arg sha "${{ github.sha }}" \
+          --arg branch "${{ github.ref_name }}" \
+          --arg built_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          --argjson artifact_lists '${{ inputs.artifact_lists }}' \
+          '{
+            run_id: $run_id,
+            repository: $repository,
+            sha: $sha,
+            branch: $branch,
+            built_at: $built_at,
+            artifacts: ($artifact_lists | add | map({key: .name, value: .}) | from_entries)
+          }' > manifest.json
+
+    - name: Upload manifest
+      if: inputs.artifact_lists != ''
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: artifact_manifest
+        path: manifest.json
