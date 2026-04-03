@@ -41,3 +41,82 @@ jobs:
         with:
           name: image
           path: image.txt
+
+  dispatch-release:
+    name: Dispatch Release Pipeline
+    runs-on: ubuntu-24.04
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/rc'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Read version
+        id: version
+        run: |
+          VERSION=$(grep -oP '(?<=<Version>)[^<]+' Directory.Build.props)
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not read version from Directory.Build.props"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Detected version: $VERSION"
+
+      - name: Create release branch in approval-demo
+        env:
+          GH_TOKEN: ${{ secrets.DEMO_PAT }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          BRANCH="release/$VERSION"
+
+          EXISTING=$(gh api "repos/pixman20-org/approval-demo/branches/$BRANCH" \
+            --jq '.name' 2>/dev/null || echo "")
+
+          if [ -n "$EXISTING" ]; then
+            echo "Branch $BRANCH already exists, skipping creation"
+          else
+            MAIN_SHA=$(gh api "repos/pixman20-org/approval-demo/branches/main" \
+              --jq '.commit.sha')
+            gh api "repos/pixman20-org/approval-demo/git/refs" \
+              --method POST \
+              -f "ref=refs/heads/$BRANCH" \
+              -f "sha=$MAIN_SHA"
+            echo "Created $BRANCH from main ($MAIN_SHA)"
+          fi
+
+      - name: Trigger orchestrator-rc in approval-demo
+        env:
+          GH_TOKEN: ${{ secrets.DEMO_PAT }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          BEFORE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          gh workflow run orchestrator-rc.yml \
+            --repo pixman20-org/approval-demo \
+            --ref "release/$VERSION" \
+            --field version="$VERSION" \
+            --field ci_run_id="${{ github.run_id }}"
+
+          echo "Triggered orchestrator-rc.yml on release/$VERSION"
+
+          for i in $(seq 1 120); do
+            RUN_ID=$(gh run list \
+              --repo pixman20-org/approval-demo \
+              --workflow orchestrator-rc.yml \
+              --branch "release/$VERSION" \
+              --limit 10 \
+              --json databaseId,displayTitle | \
+              jq -r --arg id "${{ github.run_id }}" \
+              '.[] | select(.displayTitle | contains($id)) | .databaseId // empty')
+            [ -n "$RUN_ID" ] && break
+            echo "Run not yet visible, retrying in 5s..."
+            sleep 5
+          done
+
+          if [ -z "$RUN_ID" ]; then
+            echo "::warning::Could not find triggered orchestrator run to link in summary"
+          else
+            RUN_URL="https://github.com/pixman20-org/approval-demo/actions/runs/$RUN_ID"
+            echo "### Release Pipeline" >> "$GITHUB_STEP_SUMMARY"
+            echo "[Orchestrator RC — release/$VERSION]($RUN_URL)" >> "$GITHUB_STEP_SUMMARY"
+          fi
