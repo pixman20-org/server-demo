@@ -64,7 +64,7 @@ jobs:
 
       - name: Create release branch in approval-demo
         env:
-          GH_TOKEN: ${{ secrets.DEMO_PAT }}
+          GH_TOKEN: ${{ secrets.TRIGGER_CD_PAT }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           BRANCH="release/$VERSION"
@@ -86,7 +86,7 @@ jobs:
 
       - name: Trigger orchestrator-rc in approval-demo
         env:
-          GH_TOKEN: ${{ secrets.DEMO_PAT }}
+          GH_TOKEN: ${{ secrets.TRIGGER_CD_PAT }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           BEFORE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
