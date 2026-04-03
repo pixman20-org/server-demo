@@ -10,6 +10,9 @@ on:
   workflow_dispatch:
   workflow_call:
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: Lint
@@ -28,6 +31,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Build image
         run: |
@@ -50,6 +55,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Read version
         id: version
@@ -70,9 +77,9 @@ jobs:
           BRANCH="release/$VERSION"
 
           EXISTING=$(gh api "repos/pixman20-org/approval-demo/branches/$BRANCH" \
-            --jq '.name' 2>/dev/null || echo "")
+            --jq '.name // empty' 2>/dev/null || echo "")
 
-          if [ -n "$EXISTING" ]; then
+          if [ "$EXISTING" = "$BRANCH" ]; then
             echo "Branch $BRANCH already exists, skipping creation"
           else
             MAIN_SHA=$(gh api "repos/pixman20-org/approval-demo/branches/main" \
@@ -89,8 +96,6 @@ jobs:
           GH_TOKEN: ${{ secrets.TRIGGER_CD_PAT }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          BEFORE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-
           gh workflow run orchestrator-rc.yml \
             --repo pixman20-org/approval-demo \
             --ref "release/$VERSION" \
